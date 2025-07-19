@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frutiger Aero Fish Tank</title>
+    <style>
+        /* Basic styles for the body and canvas */
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0077b6; /* Fallback background color */
+            cursor: pointer;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* Updated style for the top button to be transparent/glassy */
+        #instruction {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 28px;
+            font-size: 18px;
+            font-weight: bold;
+            color: white;
+            /* Glassy transparent background */
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 50px;
+            cursor: pointer;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3), 0 2px 4px rgba(0,0,0,0.3);
+            transition: all 0.1s ease-in-out;
+            z-index: 10;
+            backdrop-filter: blur(5px); /* Adds to the glassy effect */
+            -webkit-backdrop-filter: blur(5px);
+        }
+
+        #instruction:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateX(-50%) scale(1.05);
+        }
+
+        #instruction:active {
+            transform: translateX(-50%) scale(0.95);
+            background: rgba(255, 255, 255, 0.1);
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3), 0 2px 5px rgba(0,0,0,0.3);
+        }
+
+    </style>
+</head>
+<body>
+    <div id="instruction">Drop Food Shower</div>
+    <canvas id="fishTank"></canvas>
+    
+    <script>
+        // Wait for the window to load completely before starting the simulation
+        window.onload = function() {
+            // Get the canvas and its 2D rendering context
+            const canvas = document.getElementById('fishTank');
+            const ctx = canvas.getContext('2d');
+            const instructionButton = document.getElementById('instruction');
+
+            // Set initial canvas dimensions
+            let width = canvas.width = window.innerWidth;
+            let height = canvas.height = window.innerHeight;
+
+            // --- Entity Arrays ---
+            const fishArray = [];
+            const bubbleArray = [];
+            const foodArray = [];
+
+            // --- Fish Properties ---
+            const fishCount = 12;
+            const fishPalettes = [
+                { base: '#f79d00', highlight: '#fde193', accent: '#e45c00'}, // Goldfish Orange
+                { base: '#0096c7', highlight: '#48cae4', accent: '#023e8a'}, // Ocean Blue
+                { base: '#52b788', highlight: '#d8f3dc', accent: '#2d6a4f'}, // Vibrant Green
+                { base: '#f94144', highlight: '#f9c74f', accent: '#f3722c'}, // Sunset Red/Orange
+                { base: '#e0aaff', highlight: '#f4e1ff', accent: '#9d4edd'}, // Lavender
+            ];
+
+            // --- Bubble Properties ---
+            const maxBubbles = 50;
+
+            // Utility function to get a random number in a range
+            function random(min, max) {
+                return Math.random() * (max - min) + min;
+            }
+
+            // --- Food Class ---
+            class Food {
+                constructor(x, y) {
+                    this.x = x;
+                    this.y = y;
+                    this.radius = 4;
+                    this.speedY = 0.3; 
+                    this.color = '#b5835a';
+                }
+
+                update() { this.y += this.speedY; }
+
+                draw() {
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+                    ctx.shadowBlur = 3;
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            // --- Fish Class ---
+            class Fish {
+                constructor() {
+                    this.size = random(25, 45);
+                    this.baseSpeedX = random(0.2, 0.7); 
+                    this.speedX = this.baseSpeedX * (Math.random() < 0.5 ? 1 : -1);
+                    
+                    this.x = this.speedX > 0 ? -this.size * 2 : width + this.size * 2;
+                    this.y = random(this.size, height - this.size);
+                    
+                    this.palette = fishPalettes[Math.floor(random(0, fishPalettes.length))];
+                    this.direction = this.speedX > 0 ? 1 : -1;
+
+                    this.bobAngle = random(0, Math.PI * 2);
+                    this.bobSpeed = random(0.01, 0.03); 
+                    this.bobAmplitude = random(0.2, 0.5);
+
+                    // Properties for tail animation
+                    this.tailSwayAngle = random(0, Math.PI * 2);
+                    this.tailSwaySpeed = random(0.1, 0.3);
+
+                    this.targetFood = null;
+                    this.seekingSpeed = random(1.0, 1.8); 
+                    
+                    // Properties for eating cooldown
+                    this.isFull = false;
+                    this.timeToGetHungry = 0;
+                    this.eatCooldown = 5000; // 5 seconds in milliseconds
+                    this.pelletsEaten = 0; // Counter for eaten pellets
+                    this.eatLimit = 3; // How many pellets to eat before cooldown
+                }
+
+                update() {
+                    // Update tail animation angle
+                    this.tailSwayAngle += this.tailSwaySpeed;
+
+                    // Check if the fish should become hungry again
+                    if (this.isFull && Date.now() > this.timeToGetHungry) {
+                        this.isFull = false;
+                    }
+
+                    // If the fish's target food has been eaten, forget about it
+                    if (this.targetFood && !foodArray.includes(this.targetFood)) {
+                        this.targetFood = null;
+                    }
+
+                    // If not seeking food and not full, look for some
+                    if (!this.targetFood && !this.isFull) {
+                        this.findFood();
+                    }
+                    
+                    // Move based on whether a target is set
+                    if (this.targetFood) {
+                        this.seekTarget();
+                    } else {
+                        this.wander();
+                    }
+                    this.checkBounds();
+                }
+                
+                wander() {
+                    this.x += this.speedX;
+                    this.bobAngle += this.bobSpeed;
+                    this.y += Math.sin(this.bobAngle) * this.bobAmplitude;
+
+                    if (Math.abs(this.speedX) !== this.baseSpeedX) {
+                        this.speedX = this.baseSpeedX * this.direction;
+                    }
+                }
+
+                seekTarget() {
+                    const target = this.targetFood;
+                    const dx = target.x - this.x;
+                    const dy = target.y - this.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    // If close enough, eat the food
+                    if (distance < this.size / 2) {
+                        const foodIndex = foodArray.indexOf(target);
+                        if (foodIndex > -1) foodArray.splice(foodIndex, 1);
+                        this.targetFood = null;
+                        
+                        this.pelletsEaten++; // Increment eaten counter
+
+                        // Check if the fish has eaten enough to be full
+                        if (this.pelletsEaten >= this.eatLimit) {
+                            this.isFull = true;
+                            this.timeToGetHungry = Date.now() + this.eatCooldown;
+                            this.pelletsEaten = 0; // Reset counter for next time
+                        }
+
+                    } else {
+                        // Move towards food
+                        const moveSpeed = this.seekingSpeed * (1 - distance / 400);
+                        this.speedX = (dx / distance) * Math.max(moveSpeed, 1);
+                        this.y += (dy / distance) * Math.max(moveSpeed, 1);
+                        this.direction = this.speedX > 0 ? 1 : -1;
+                        this.x += this.speedX;
+                    }
+                }
+
+                findFood() {
+                    let closestFood = null;
+                    let minDistance = 300;
+
+                    foodArray.forEach(food => {
+                        const dx = food.x - this.x;
+                        const dy = food.y - this.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            closestFood = food;
+                        }
+                    });
+                    this.targetFood = closestFood;
+                }
+
+                checkBounds() {
+                    if (this.speedX > 0 && this.x > width + this.size * 2) this.x = -this.size * 2;
+                    else if (this.speedX < 0 && this.x < -this.size * 2) this.x = width + this.size * 2;
+                    if ((this.y - this.size) < 0 || (this.y + this.size) > height) {
+                        this.y = Math.max(this.size, Math.min(height - this.size, this.y));
+                        this.bobAngle *= -1;
+                    }
+                }
+
+                draw() {
+                    ctx.save();
+                    ctx.translate(this.x, this.y);
+                    ctx.scale(this.direction, 1);
+
+                    const bodyGradient = ctx.createLinearGradient(0, -this.size / 2, 0, this.size / 2);
+                    bodyGradient.addColorStop(0, this.palette.highlight);
+                    bodyGradient.addColorStop(0.5, this.palette.base);
+                    bodyGradient.addColorStop(1, this.palette.accent);
+                    
+                    // --- COMBINED TAIL ANIMATION LOGIC ---
+                    // Horizontal sway for the control point (Amplitude increased for more motion)
+                    const tailSwayX = Math.sin(this.tailSwayAngle) * (this.size / 6);
+                    // Vertical sway for the tail tips (using cosine for a different phase)
+                    const tailSwayY = Math.cos(this.tailSwayAngle) * (this.size / 8);
+
+                    // Draw tail with combined horizontal and vertical animation
+                    ctx.fillStyle = this.palette.accent;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    // Apply vertical sway to the Y-coordinates of the tail tips
+                    ctx.lineTo(-this.size / 1.5, -this.size / 2 + tailSwayY);
+                    // Apply horizontal sway to the X of the control point
+                    ctx.quadraticCurveTo(-this.size / 1.2 + tailSwayX, 0, -this.size / 1.5, this.size / 2 - tailSwayY);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Draw main body shape over the tail
+                    ctx.fillStyle = bodyGradient;
+                    ctx.beginPath();
+                    ctx.moveTo(0, -this.size / 4);
+                    ctx.quadraticCurveTo(this.size / 2, -this.size / 2, this.size, 0);
+                    ctx.quadraticCurveTo(this.size / 2, this.size / 2, 0, this.size / 4);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Draw dorsal fin
+                    ctx.fillStyle = `rgba(255, 255, 255, 0.2)`;
+                    ctx.beginPath();
+                    ctx.moveTo(this.size / 4, -this.size / 5);
+                    ctx.lineTo(this.size / 2, -this.size / 1.8);
+                    ctx.lineTo(this.size * 0.7, -this.size/4);
+                    ctx.closePath();
+                    ctx.fill();
+                    
+                    // Draw eye with highlight
+                    const eyeX = this.size * 0.7;
+                    const eyeY = -this.size * 0.1;
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(eyeX, eyeY, this.size / 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#000';
+                    ctx.beginPath();
+                    ctx.arc(eyeX, eyeY, this.size / 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath();
+                    ctx.arc(eyeX + this.size / 20, eyeY - this.size / 20, this.size / 25, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.restore();
+                }
+            }
+
+            // --- Bubble Class ---
+            class Bubble {
+                constructor() {
+                    this.x = random(0, width);
+                    this.y = height + random(0, 100);
+                    this.radius = random(5, 15);
+                    this.speedY = random(0.2, 1.0);
+                    this.angle = 0;
+                    this.amplitude = random(0.2, 0.8);
+                    this.frequency = random(0.01, 0.03);
+                }
+
+                update() {
+                    this.y -= this.speedY;
+                    this.angle += this.frequency;
+                    this.x += Math.sin(this.angle) * this.amplitude;
+                    if (this.y < -this.radius) {
+                        this.y = height + this.radius;
+                        this.x = random(0, width);
+                    }
+                }
+
+                draw() {
+                    ctx.save();
+                    const gradient = ctx.createRadialGradient(
+                        this.x - this.radius * 0.3, this.y - this.radius * 0.3, this.radius * 0.1,
+                        this.x, this.y, this.radius
+                    );
+                    gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+                    gradient.addColorStop(0.8, 'rgba(200, 230, 255, 0.4)');
+                    gradient.addColorStop(1, 'rgba(200, 230, 255, 0.1)');
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
+
+            function init() {
+                for (let i = 0; i < fishCount; i++) fishArray.push(new Fish());
+                for (let i = 0; i < maxBubbles; i++) bubbleArray.push(new Bubble());
+            }
+
+            function animate() {
+                // Restore the blue gradient background
+                const bgGradient = ctx.createRadialGradient(width / 2, 0, 0, width / 2, height, height);
+                bgGradient.addColorStop(0, '#ade8f4');
+                bgGradient.addColorStop(0.5, '#00b4d8');
+                bgGradient.addColorStop(1, '#0077b6');
+                ctx.fillStyle = bgGradient;
+                ctx.fillRect(0, 0, width, height);
+
+                foodArray.forEach((food, index) => {
+                    food.update();
+                    food.draw();
+                    if (food.y > height + food.radius) foodArray.splice(index, 1);
+                });
+
+                bubbleArray.forEach(bubble => {
+                    bubble.update();
+                    bubble.draw();
+                });
+
+                fishArray.forEach(fish => {
+                    fish.update();
+                    fish.draw();
+                });
+
+                requestAnimationFrame(animate);
+            }
+
+            // --- Event Listeners ---
+            window.addEventListener('resize', () => {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+            });
+
+            // Listener for single-click feeding anywhere on the canvas
+            canvas.addEventListener('click', (event) => {
+                if (foodArray.length < 50) { // Keep a total food limit
+                    foodArray.push(new Food(event.clientX, event.clientY));
+                }
+            });
+
+            // Listener for the "Drop Food Shower" button at the top
+            instructionButton.addEventListener('click', (event) => {
+                event.stopPropagation(); // Prevents the canvas click from firing too
+                const foodDropCount = 25;
+                for (let i = 0; i < foodDropCount; i++) {
+                    if (foodArray.length < 50) {
+                        const randomX = random(0, width);
+                        const randomY = random(-150, -10); // Start from above the screen
+                        foodArray.push(new Food(randomX, randomY));
+                    }
+                }
+            });
+
+            // --- Start the simulation ---
+            init();
+            animate();
+        };
+    </script>
+</body>
+</html>
